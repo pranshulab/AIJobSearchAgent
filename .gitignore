@@ -1,7 +1,22 @@
+# Python
 .venv/
 __pycache__/
 *.py[cod]
+
+# Testing and tooling
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Secrets
 .env
+.env.*
+
+# Local databases and private user data
 data/*
 outputs/*
-.pytest_cache/
+
+# Editor and OS files
+.vscode/
+.DS_Store
+Thumbs.db
