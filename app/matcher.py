@@ -16,6 +16,7 @@ class JobListing:
     location: str
     required_skills: list[str]
     url: str = ""
+    description: str=""
 
 
 @dataclass

@@ -2,3 +2,5 @@ pydantic
 pypdf
 pytest
 streamlit
+requests
+llama-cpp-python
