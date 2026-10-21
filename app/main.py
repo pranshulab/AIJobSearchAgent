@@ -2,6 +2,7 @@
 import streamlit as st
 
 from app.matcher import CandidateProfile, JobListing, match_job
+from app.resume_parser import parse_resume
 
 
 st.set_page_config(
@@ -12,9 +13,10 @@ st.set_page_config(
 
 st.title("🎯 AI Job Search Agent")
 st.caption(
-    "Discover relevant jobs, evaluate skill matches, "
-    "and prepare for human-reviewed applications."
+    "Upload your resume, review the extracted profile, "
+    "and find jobs that match your skills."
 )
+
 
 SAMPLE_JOBS = [
     JobListing(
@@ -40,22 +42,91 @@ SAMPLE_JOBS = [
     ),
 ]
 
+
 if "custom_jobs" not in st.session_state:
     st.session_state.custom_jobs = []
 
+if "resume_profile" not in st.session_state:
+    st.session_state.resume_profile = None
+
+if "candidate_name" not in st.session_state:
+    st.session_state.candidate_name = "Candidate"
+
+if "candidate_email" not in st.session_state:
+    st.session_state.candidate_email = ""
+
+if "candidate_phone" not in st.session_state:
+    st.session_state.candidate_phone = ""
+
+if "skills_input" not in st.session_state:
+    st.session_state.skills_input = "Python, LangChain, RAG"
+
+if "education_text" not in st.session_state:
+    st.session_state.education_text = ""
+
+if "projects_text" not in st.session_state:
+    st.session_state.projects_text = ""
+
+if "experience_text" not in st.session_state:
+    st.session_state.experience_text = ""
+
+
+st.subheader("1. Upload your resume")
+
+uploaded_file = st.file_uploader(
+    "Choose a text-based PDF resume",
+    type=["pdf"],
+    help="Maximum 10 MB and 30 pages. Scanned PDFs require OCR.",
+)
+
+if st.button(
+    "Extract resume information",
+    disabled=uploaded_file is None,
+):
+    try:
+        profile = parse_resume(uploaded_file.getvalue())
+
+        # Populate editable fields before rendering the widgets.
+        st.session_state.resume_profile = profile
+        st.session_state.candidate_name = profile.name or "Candidate"
+        st.session_state.candidate_email = profile.email
+        st.session_state.candidate_phone = profile.phone
+        st.session_state.skills_input = ", ".join(profile.skills)
+        st.session_state.education_text = profile.education
+        st.session_state.projects_text = profile.projects
+        st.session_state.experience_text = profile.experience
+
+        st.success("Resume text extracted. Review every field below.")
+
+    except ValueError as exc:
+        st.error(str(exc))
+
+
+st.divider()
+st.subheader("2. Review your candidate profile")
 
 with st.sidebar:
     st.header("Candidate profile")
 
     candidate_name = st.text_input(
         "Name",
-        value="Candidate",
+        key="candidate_name",
+    )
+
+    candidate_email = st.text_input(
+        "Email",
+        key="candidate_email",
+    )
+
+    candidate_phone = st.text_input(
+        "Phone",
+        key="candidate_phone",
     )
 
     skills_input = st.text_area(
-        "Your skills (comma-separated)",
-        value="Python, LangChain, RAG",
-        help="Enter skills you can honestly demonstrate.",
+        "Skills (comma-separated)",
+        key="skills_input",
+        help="Correct the extracted skills. Only keep skills you can demonstrate.",
     )
 
     experience_years = st.number_input(
@@ -64,12 +135,39 @@ with st.sidebar:
         max_value=60.0,
         value=0.0,
         step=0.5,
+        key="experience_years",
     )
 
-    st.info(
-        "Phase 1 uses explicit skill matching. "
-        "Resume parsing and local LLM inference come later."
+    st.caption(
+        "The experience duration is entered manually in this version. "
+        "It is not inferred from resume dates."
     )
+
+
+with st.expander("Education", expanded=False):
+    st.text_area(
+        "Extracted education",
+        key="education_text",
+        height=120,
+    )
+
+with st.expander("Projects", expanded=False):
+    st.text_area(
+        "Extracted projects",
+        key="projects_text",
+        height=160,
+    )
+
+with st.expander("Experience", expanded=False):
+    st.text_area(
+        "Extracted experience",
+        key="experience_text",
+        height=160,
+    )
+
+if st.session_state.resume_profile is not None:
+    with st.expander("Original extracted text", expanded=False):
+        st.text(st.session_state.resume_profile.raw_text)
 
 
 candidate = CandidateProfile(
@@ -82,7 +180,9 @@ candidate = CandidateProfile(
     experience_years=experience_years,
 )
 
-st.subheader("Add a job")
+
+st.divider()
+st.subheader("3. Add a job")
 
 with st.form("add_job_form", clear_on_submit=True):
     job_title = st.text_input("Job title")
@@ -103,11 +203,13 @@ with st.form("add_job_form", clear_on_submit=True):
         ]
 
         if not job_title.strip() or not company.strip():
-            st.error("Please enter both a job title and company.")
+            st.error("Enter both a job title and company.")
         elif not required_skills:
             st.error("Enter at least one required skill.")
-        elif job_url and not job_url.startswith(("https://", "http://")):
-            st.error("The job URL must begin with http:// or https://.")
+        elif job_url and not job_url.startswith(
+            ("https://", "http://")
+        ):
+            st.error("The job URL must start with http:// or https://.")
         else:
             st.session_state.custom_jobs.append(
                 JobListing(
@@ -121,37 +223,40 @@ with st.form("add_job_form", clear_on_submit=True):
             st.success("Job added to this session.")
 
 
+st.divider()
+st.subheader("4. Ranked job opportunities")
+
 all_jobs = SAMPLE_JOBS + st.session_state.custom_jobs
 
-st.divider()
-st.subheader("Ranked job opportunities")
-
 if not candidate.skills:
-    st.warning("Enter at least one candidate skill in the sidebar.")
+    st.warning(
+        "No skills are available yet. Upload a resume or enter skills "
+        "in the sidebar to start matching."
+    )
 else:
     results = [
         match_job(candidate, job)
         for job in all_jobs
     ]
 
-    results.sort(key=lambda result: result.score, reverse=True)
+    results.sort(
+        key=lambda result: result.score,
+        reverse=True,
+    )
 
     col1, col2, col3 = st.columns(3)
 
     col1.metric("Jobs analyzed", len(results))
-    col2.metric("Candidate skills", len({
-        skill.strip().casefold()
-        for skill in candidate.skills
-        if skill.strip()
-    }))
+    col2.metric("Candidate skills", len(set(
+        skill.casefold() for skill in candidate.skills
+    )))
     col3.metric(
         "Best skill match",
         f"{results[0].score:.1f}%" if results else "N/A",
     )
 
     st.caption(
-        "Scores measure required-skill coverage only. "
-        "They do not predict interview or hiring probability."
+        "Skill coverage is not a probability of getting hired."
     )
 
     for result in results:
@@ -167,25 +272,19 @@ else:
                 text=f"Skill coverage: {result.score:.1f}%",
             )
 
-            matched_text = (
-                ", ".join(result.matched_skills)
-                or "None identified"
+            st.write(
+                "**Matched skills:** "
+                + (", ".join(result.matched_skills) or "None identified")
             )
-            missing_text = (
-                ", ".join(result.missing_skills)
-                or "None identified"
+            st.write(
+                "**Missing skills:** "
+                + (", ".join(result.missing_skills) or "None identified")
             )
-
-            st.write(f"**Matched skills:** {matched_text}")
-            st.write(f"**Missing skills:** {missing_text}")
 
             if result.job.url:
-                st.link_button(
-                    "Open job listing",
-                    result.job.url,
-                )
+                st.link_button("Open job listing", result.job.url)
 
             st.caption(
-                "Review the original listing and your qualifications "
-                "before applying. No application is submitted by this app."
+                "Review the original listing and application materials. "
+                "This app does not submit applications."
             )
